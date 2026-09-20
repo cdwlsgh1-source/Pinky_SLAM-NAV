@@ -1,0 +1,68 @@
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String
+import sys
+import time
+
+
+class PatrolClient(Node):
+    """
+    관제 PC에서 실행하는 노드.
+    로봇에게 명령(start/stop)을 보내거나, 로봇 상태(status)를 구독해서 화면에 출력한다.
+    """
+
+    def __init__(self, namespace):
+        # 노드 이름을 'patrol_client_pinky1' 같은 식으로 짓는다
+        super().__init__('patrol_client_' + namespace)        # 결과 = patrol_client_pinky1(2)
+
+        # 명령을 보낼 토픽 (publisher)
+        topic_cmd = '/' + namespace + '/patrol_cmd'           #  결과 = /pinky1(2)/patrol_cmd
+        self.cmd_pub = self.create_publisher(String, topic_cmd, 10)
+
+        # 상태를 받을 토픽 (subscriber)
+        topic_status = '/' + namespace + '/patrol_status'     # 결과 topic_status = /pinky1(2)/patrol_status
+        self.create_subscription(String, topic_status, self.status_callback, 10)
+
+    def status_callback(self, msg):
+        # 로봇이 상태를 보내올 때마다 이 함수가 자동으로 실행됨
+        print('상태 수신:', msg.data)
+
+    def send_command(self, cmd):
+        # 노드가 막 켜진 직후라 로봇과 연결이 안 됐을 수도 있으니
+        # 1초 정도 잠깐 기다렸다가 명령을 보낸다
+        time.sleep(1.0)
+
+        msg = String()
+        msg.data = cmd
+        self.cmd_pub.publish(msg)   # 참고: cmd_pub = create_publisher() -> 받은 명령을 발행(메시지 발송)
+
+
+def main():
+    # 인자 개수 확인 (파일명 포함 3개 필요: 파일명, namespace, action)
+    if len(sys.argv) < 3:
+        print('사용법: python3 patrol_client.py <pinky1|pinky2> <start|stop|monitor>')
+        return
+
+    namespace = sys.argv[1]
+    action = sys.argv[2]
+
+    rclpy.init()
+    node = PatrolClient(namespace)
+
+    if action == 'start' or action == 'stop':
+        node.send_command(action)
+        print(namespace, '에게', action, '명령 전송 완료')
+
+    elif action == 'monitor':
+        print(namespace, '상태 모니터링 시작 (Ctrl+C로 종료)')
+        rclpy.spin(node)
+
+    else:
+        print('알 수 없는 명령:', action)
+
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
