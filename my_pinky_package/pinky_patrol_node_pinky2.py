@@ -5,6 +5,11 @@ from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from std_msgs.msg import String
 import json, math, os, time, threading
 
+# === ZONE-MUTEX ADDED: import =============================================
+# pip/colcon으로 zone_traffic_control 패키지가 설치되어 있어야 합니다.
+from zone_traffic_control.zone_gate_client import ZoneGateClient
+# ============================================================================
+
 
 class PinkyPatrolNode(Node):
     """
@@ -12,8 +17,9 @@ class PinkyPatrolNode(Node):
     - Nav2 액션(navigate_to_pose)은 전부 로컬(BasicNavigator)로 처리
       -> 로봇 내부에서 끝나는 통신이라 도메인 브릿지 불필요
     - 관제 PC와는 'patrol_cmd'(명령 수신) / 'patrol_status'(상태 송신)
-      단 2개의 평범한 String 토픽으로만 통신
-      -> 브릿지로 리매핑해야 할 대상이 이 2개뿐이라 관리가 단순해짐
+      + (ZONE-MUTEX 추가) 'zone_manager/*' 토픽들
+      역시 patrol_cmd/status와 같은 성격의 가벼운 String 토픽이라
+      동일한 방식으로 도메인 브릿지에 추가하기만 하면 됩니다.
     - waypoints는 로봇마다 다르므로 로봇별로 따로 관리
     """
 
@@ -29,32 +35,70 @@ class PinkyPatrolNode(Node):
     "P6": (1.498,  0.100),   # 우측 위 끝 (far right, upper)
     "P7": (0.002, -0.597),   # 원점 아래쪽 (x는 원점과 거의 동일, y만 아래로)
 	}
- 
-    # Pinky 1 경로: 원점 -> 중간지점 -> 우측 사각형 한 바퀴 -> 되돌아 원점
-    # WAYPOINTS = [
-    #     POINTS["P1"],  # 시작점 (원점 부근, 0.002, 0.001)
-    #     POINTS["P2"],  # 중간 경유점 (0.598, 0.151)
-    #     POINTS["P3"],  # 우측 아래 끝 (1.502, -0.400)
-    #     POINTS["P4"],  # 중앙-우측 아래 (1.000, -0.400)
-    #     POINTS["P5"],  # 중앙-우측 위 (1.000, 0.100)
-    #     POINTS["P6"],  # 우측 위 끝 (1.498, 0.100)
-    #     POINTS["P5"],  # 중앙-우측 위로 복귀 (1.000, 0.100)
-    #     POINTS["P1"],  # 시작점으로 복귀 (0.002, 0.001)
-    # ]
 
-    # Pinky 2 경로: 원점 아래쪽 -> 우측 사각형 -> 원점 복귀
+    # Pinky 1 경로 (참고용, 이 파일은 pinky2 전용이라 사용 안 함. pinky1 전용 파일 별도 참고)
+    # WAYPOINTS = [
+    #     POINTS["P1"],  # 0: 시작점 (원점 부근, 0.002, 0.001)
+    #     POINTS["P2"],  # 1: 중간 경유점 (0.598, 0.151)
+    #     POINTS["P4"],  # 2: 중앙-우측 아래 (1.000, -0.400)  <- 여기 도착 후 진입 허가 요청
+    #     POINTS["P3"],  # 3: 우측 아래 끝 (1.502, -0.400)     (위험 구역 안)
+    #     POINTS["P6"],  # 4: 우측 위 끝 (1.498, 0.100)         (위험 구역 안)
+    #     POINTS["P4"],  # 5: 중앙-우측 아래 (1.000, -0.400)   <- 여기 도착 시 이탈 통보
+    #     POINTS["P1"],  # 6: 시작점으로 복귀 (0.002, 0.001)
+    # ]
+    # (ZONE_ENTRY_INDEX = 2, ZONE_EXIT_INDEX = 5)
+
+    # Pinky 2 경로: 원점 아래쪽 -> P4 진입 -> P3 -> P6 -> P4로 복귀 -> 원점 아래쪽
+    # 위험 구역 = P4에 도착한 뒤 P3로 향하기 직전부터 시작해서, P3, P6를 거쳐
+    # 다시 P4로 돌아올 때까지 전 구간. (P4는 위험 구역의 "문": P4까지는 자유롭게
+    # 이동하고, P4를 지나가려는 순간부터 허가가 필요. 다시 P4로 돌아오면 위험 구역 종료)
     WAYPOINTS = [
-        POINTS["P7"],  # 시작점 (원점 아래쪽, 0.002, -0.597)
-        POINTS["P3"],  # 우측 아래 끝 (1.502, -0.400)
-        POINTS["P6"],  # 우측 위 끝 (1.498, 0.100)
-        POINTS["P7"],  # 시작점 (원점 아래쪽, 0.002, -0.597)
+        POINTS["P7"],  # 0: 시작점 (원점 아래쪽, 0.002, -0.597)
+        POINTS["P4"],  # 1: 중앙-우측 아래 (1.000, -0.400)  <- 여기 도착 후 진입 허가 요청
+        POINTS["P3"],  # 2: 우측 아래 끝 (1.502, -0.400)     (위험 구역 안)
+        POINTS["P6"],  # 3: 우측 위 끝 (1.498, 0.100)         (위험 구역 안)
+        POINTS["P4"],  # 4: 중앙-우측 아래 (1.000, -0.400)   <- 여기 도착 시 이탈 통보
+        POINTS["P7"],  # 5: 시작점으로 복귀 (0.002, -0.597)
     ]
+
+    # === ZONE-MUTEX ADDED =====================================================
+    """
+    ZONE_ENTRY_INDEX: 이 인덱스의 waypoint에 "도착한 직후", 다음 waypoint로
+    출발하기 전에 위험 구역 진입 허가를 요청합니다. (그 waypoint 자체까지는
+    자유롭게 이동하고, 그 지점을 지나가려는 순간부터 허가가 필요합니다.)
+
+    ZONE_EXIT_INDEX: 이 인덱스의 waypoint에 도착하면 위험 구역을 완전히
+    벗어난 것으로 보고 통보합니다.
+
+    이번 경로는 P4에 도착한 뒤 P3로 향하기 직전부터 위험 구역이 시작되고,
+    P3 -> P6를 거쳐 다시 P4로 돌아오면 위험 구역을 벗어난 것으로 판단합니다:
+      - 첫 번째 P4(index 1)에 도착한 직후, P3로 출발하기 전에 진입 허가를 받고
+      - 두 번째 P4(index 4)에 도착하면 위험 구역을 벗어난 것으로 봅니다.
+    """
+
+    ZONE_ENTRY_INDEX = 1   # WAYPOINTS[1] = P4(첫번째), 도착 직후 다음 구간(P3)으로 넘어가기 전 진입 허가 대기
+    ZONE_EXIT_INDEX = 4    # WAYPOINTS[4] = P4(두번째), 여기 도착 시 위험 구역을 완전히 벗어났다고 통보
+    # ============================================================================
 
     def __init__(self):
         super().__init__('pinky_patrol_node')
 
+        # === ZONE-MUTEX ADDED: robot_id 파라미터 ==================================
+        # 실행 시 --ros-args -p robot_id:=pinky2 로 지정 (이 파일 기본값도 pinky2).
+        # zone_manager_node의 robot_ids 파라미터에 있는 값과 정확히 같아야 합니다.
+        self.declare_parameter('robot_id', 'pinky2')
+        self.robot_id = self.get_parameter('robot_id').value
+        # ============================================================================
+
         # Nav2 액션 클라이언트 역할 + 퍼블리셔 생성 헬퍼 역할을 겸함
         self.navigator = BasicNavigator()
+
+        # === ZONE-MUTEX ADDED: gate client ========================================
+        # navigator를 그대로 넘깁니다. 기존 코드가 isTaskComplete() 폴링 등으로
+        # navigator를 이미 spin하고 있는 패턴과 동일하게 동작해서 별도 스레드/
+        # executor 충돌 걱정이 없습니다.
+        self.gate = ZoneGateClient(self.navigator, robot_id=self.robot_id)
+        # ============================================================================
 
         # 관제 PC로 상태를 알리는 퍼블리셔
         self.status_pub = self.create_publisher(String, 'patrol_status', 10)
@@ -244,6 +288,27 @@ class PinkyPatrolNode(Node):
                 if result == TaskResult.SUCCEEDED:
                     self.get_logger().info(f'{i+1}번째 목표 도착 성공 ({attempt+1}번째 시도)')
                     self.publish_status('MOVING', i + 1)
+
+                    # === ZONE-MUTEX ADDED: 이탈 통보 ===================================
+                    # 위험 구역을 완전히 벗어나는 waypoint에 도착했으므로 락을 반납합니다.
+                    if i == self.ZONE_EXIT_INDEX:
+                        self.gate.notify_exit()
+                    # ============================================================================
+
+                    # === ZONE-MUTEX ADDED: 진입 허가 대기 =============================
+                    # 위험 구역의 "문"이 되는 waypoint(P4)에 도착한 직후, 다음 구간(P3)
+                    # 으로 넘어가기 전에 허가를 기다립니다. 즉 P4까지는 자유롭게 오고,
+                    # P4를 "지나가려는" 순간부터 다른 로봇이 구역 안에 있으면 여기서
+                    # 블로킹 대기합니다. 대기 중 stop 명령이 들어오면 즉시 빠져나옵니다.
+                    if i == self.ZONE_ENTRY_INDEX:
+                        self.get_logger().info(f'[{i+1}] 위험 구역 진입 허가 요청 중...')
+                        self.publish_status('WAITING_ZONE', i)
+                        granted = self.gate.wait_for_entry(
+                            stop_check=lambda: self._stop_requested)
+                        # granted가 False인 경우는 stop 명령으로 중단된 경우뿐이며,
+                        # self._stop_requested가 이미 True이므로 아래 STOPPED 처리로 이어집니다.
+                    # ============================================================================
+
                     break  # 성공 -> 재시도 루프 탈출 (else 블록 스킵됨)
                 else:
                     self.get_logger().warn(
@@ -255,6 +320,10 @@ class PinkyPatrolNode(Node):
                 self.publish_status('FAILED', i + 1)
 
             if self._stop_requested:
+                # 주의: 구역 안에서 멈춘 경우 여기서는 notify_exit를 보내지 않습니다.
+                # 로봇이 실제로 아직 구역 안에 물리적으로 있기 때문입니다.
+                # (다음 start에서 이어서 zone을 빠져나가거나, zone_manager의
+                #  max_hold_sec 타임아웃으로 최종적으로 해제됩니다)
                 self.publish_status('STOPPED', i)
                 break
         else:
