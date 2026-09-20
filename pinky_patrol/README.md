@@ -1,7 +1,4 @@
-<aside>
-<img src="/icons/clipping_gray.svg" alt="/icons/clipping_gray.svg" width="40px" />
-
-## A. 코드해석
+# A. 코드해석
 
 ## 코드 해석: `patrol_client.py` (초보자용 완전 쉬운 버전)
 
