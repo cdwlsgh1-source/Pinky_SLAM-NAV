@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>my_pinky_map10 좌표 뷰어</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#151b23; --line:#22303c; --grid-major:#3a4b55; --grid-minor:#1c262e;
+    --accent:#5fd3a3; --accent2:#f2a65a; --text:#dbe4ea; --dim:#7b8a96; --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+  }
+  @media (prefers-color-scheme: light){
+    :root:not([data-theme="dark"]){
+      --bg:#f4f6f8; --panel:#ffffff; --line:#d8e0e6; --grid-major:#c3ccd3; --grid-minor:#e7ecef;
+      --accent:#1f8f66; --accent2:#c9701f; --text:#1b242b; --dim:#5b6870;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0d1117; --panel:#151b23; --line:#22303c; --grid-major:#3a4b55; --grid-minor:#1c262e;
+    --accent:#5fd3a3; --accent2:#f2a65a; --text:#dbe4ea; --dim:#7b8a96;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text); font-family:var(--mono);
+    min-height:100vh; padding:24px 16px 60px;
+  }
+  .wrap{max-width:980px; margin:0 auto;}
+  h1{font-size:15px; font-weight:600; letter-spacing:.02em; color:var(--text); margin:0 0 2px;}
+  .sub{color:var(--dim); font-size:12px; margin:0 0 18px; line-height:1.5;}
+  .meta{
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:1px;
+    background:var(--line); border:1px solid var(--line); border-radius:6px; overflow:hidden;
+    margin-bottom:16px; font-size:11px;
+  }
+  .meta div{background:var(--panel); padding:8px 10px;}
+  .meta b{display:block; color:var(--dim); font-weight:500; font-size:10px; text-transform:none; margin-bottom:2px;}
+  .meta span{color:var(--accent); font-size:12.5px;}
+  .stage{
+    position:relative; background:var(--panel); border:1px solid var(--line); border-radius:8px;
+    padding:16px; overflow:auto;
+  }
+  canvas{display:block; cursor:crosshair; image-rendering:pixelated; border-radius:2px;}
+  .readout{
+    display:flex; gap:18px; align-items:center; flex-wrap:wrap;
+    background:var(--panel); border:1px solid var(--line); border-top:none; border-radius:0 0 8px 8px;
+    padding:10px 16px; font-size:12.5px; margin-top:-1px;
+  }
+  .readout .tag{color:var(--dim);}
+  .readout .val{color:var(--accent); font-weight:600; min-width:118px; display:inline-block;}
+  .readout .val2{color:var(--accent2); font-weight:600; min-width:70px; display:inline-block;}
+  .controls{display:flex; gap:8px; margin:12px 0 4px; flex-wrap:wrap;}
+  button{
+    font-family:var(--mono); font-size:11.5px; background:var(--panel); color:var(--text);
+    border:1px solid var(--line); padding:7px 12px; border-radius:6px; cursor:pointer;
+  }
+  button:hover{border-color:var(--accent); color:var(--accent);}
+  .points{margin-top:10px; font-size:12px;}
+  .points-list{list-style:none; margin:6px 0 0; padding:0; max-height:160px; overflow:auto;}
+  .points-list li{
+    display:flex; justify-content:space-between; gap:8px; padding:5px 8px; border-bottom:1px solid var(--line);
+    color:var(--text); font-size:12px;
+  }
+  .points-list li span.c{color:var(--accent);}
+  .points-list li button{padding:2px 7px; font-size:10px;}
+  .empty{color:var(--dim); font-size:12px; padding:6px 2px;}
+  .legend{display:flex; gap:14px; font-size:11px; color:var(--dim); margin-top:10px; flex-wrap:wrap;}
+  .legend span{display:inline-flex; align-items:center; gap:5px;}
+  .sw{width:10px; height:10px; border-radius:2px; display:inline-block;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>my_pinky_map10 — 좌표계 뷰어</h1>
+  <p class="sub">map.yaml 의 resolution / origin 기준으로 실제 map 좌표계(m)를 픽셀에 매핑했습니다. 지도 위에서 마우스를 움직이면 좌표가 실시간으로 표시되고, 클릭하면 점이 찍히고 목록에 기록됩니다.</p>
+
+  <div class="meta" id="meta"></div>
+
+  <div class="stage">
+    <canvas id="cv"></canvas>
+  </div>
+  <div class="readout">
+    <span><span class="tag">pixel</span> <span class="val" id="pxOut">-</span></span>
+    <span><span class="tag">map (x, y)</span> <span class="val" id="xyOut">-</span></span>
+    <span><span class="tag">occupancy</span> <span class="val2" id="occOut">-</span></span>
+  </div>
+
+  <div class="controls">
+    <button id="clearBtn">모든 점 지우기</button>
+    <button id="gridBtn">그리드 on/off</button>
+  </div>
+
+  <div class="points">
+    <div id="pointsEmpty" class="empty">클릭해서 지점을 찍으면 여기에 좌표가 기록됩니다.</div>
+    <ul class="points-list" id="pointsList"></ul>
+  </div>
+
+  <div class="legend">
+    <span><i class="sw" style="background:#ff5c5c"></i> 0.2 m 그리드</span>
+    <span><i class="sw" style="background:#39c6ff"></i> 0.05 m 그리드</span>
+    <span><i class="sw" style="background:#5fd3a3"></i> map 원점 (0,0)</span>
+    <span><i class="sw" style="background:#f2a65a"></i> 클릭한 지점</span>
+  </div>
+</div>
+
+<script>
+const META = {
+  image_w: 189,
+  image_h: 120,
+  resolution: 0.010,
+  origin: [-0.167, -0.907, 0],
+  negate: 0,
+  occupied_thresh: 0.65,
+  free_thresh: 0.196
+};
+const SCALE = 5; // display px per map px
+
+const metaEl = document.getElementById('meta');
+const xMin = META.origin[0], yMin = META.origin[1];
+const xMax = xMin + META.image_w * META.resolution;
+const yMax = yMin + META.image_h * META.resolution;
+metaEl.innerHTML = `
+  <div><b>이미지 크기</b><span>${META.image_w} × ${META.image_h} px</span></div>
+  <div><b>해상도</b><span>${META.resolution} m/px</span></div>
+  <div><b>origin (map frame)</b><span>${xMin.toFixed(3)}, ${yMin.toFixed(3)}</span></div>
+  <div><b>x 범위</b><span>${xMin.toFixed(3)} ~ ${xMax.toFixed(3)} m</span></div>
+  <div><b>y 범위</b><span>${yMin.toFixed(3)} ~ ${yMax.toFixed(3)} m</span></div>
+`;
+
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+cv.width = META.image_w * SCALE;
+cv.height = META.image_h * SCALE;
+
+const img = new Image();
+img.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAL0AAAB4CAAAAACCmazrAAABk0lEQVR4nO2cS5KDMAxEJYobzf2PkCtFszA1NanE4J9oqdJvkUUC9qNjsIkd9CGJ2dACU+wiP2iHUR7Js89tv4uIiC0u9Shvay66W6CkvvfuNlK1iX7eqPJ2M7P217WbzFvWuLY3ERF9rV3bZc63nDyoV/tqYZO11Haf/Ub2NcWAKOduUvnk13va4/hG+yhn+TdmHwXa46A9Dtqfop6FM3sctMdBexy0x+Fo79pPFTyz99dny8Hhb+/Zfph9hRt+NmH2NfzDZ/Y4Ytn3Xl1XzHguYiDIWNn3coO9Y2fL7HHEOWvVrGcOfvt7iYH1985x7EfGFTfYOw534mQ/Au1xsK/FQXsctMdBexy57R3H917Ld//haF8WILvifG/lfAQc3+OgPQ7a46A9DtrjoD0O2uOgPQ7a46A9DtrjCDLbPBhi7uxpjyNIuz/ofRxOEPuncGVXMmiPg/Y4aI+D9jhoj4P2OGiPI479yGKMtnsrFTG9Xi/xJmC1DxbRZm+iVYEzM+//Bxf7OO2nj6zehdz2mvqJwr8BGC14zxGRrwAAAABJRU5ErkJggg==';
+
+let showGrid = true;
+let points = []; // {px, py, x, y}
+
+function pxToMap(px, py){
+  // px,py in image pixel coords, row0 = TOP of image.
+  // ROS map_server: origin = world coord of image's BOTTOM-LEFT pixel corner.
+  const x = xMin + px * META.resolution;
+  const y = yMax - py * META.resolution;
+  return [x, y];
+}
+
+function mapToPx(x, y){
+  const px = (x - xMin) / META.resolution;
+  const py = (yMax - y) / META.resolution;
+  return [px, py];
+}
+
+function draw(){
+  ctx.clearRect(0,0,cv.width,cv.height);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, 0, 0, cv.width, cv.height);
+
+  if(showGrid){
+    // minor grid 0.05m
+    ctx.strokeStyle = 'rgba(57,198,255,0.35)';
+    ctx.lineWidth = 1;
+    for(let gx = Math.ceil(xMin/0.05)*0.05; gx <= xMax; gx += 0.05){
+      const [px] = mapToPx(gx, 0);
+      ctx.beginPath(); ctx.moveTo(px*SCALE, 0); ctx.lineTo(px*SCALE, cv.height); ctx.stroke();
+    }
+    for(let gy = Math.ceil(yMin/0.05)*0.05; gy <= yMax; gy += 0.05){
+      const [,py] = mapToPx(0, gy);
+      ctx.beginPath(); ctx.moveTo(0, py*SCALE); ctx.lineTo(cv.width, py*SCALE); ctx.stroke();
+    }
+    // major grid 0.2m
+    ctx.strokeStyle = 'rgba(255,92,92,0.55)';
+    for(let gx = Math.ceil(xMin/0.2)*0.2; gx <= xMax; gx += 0.2){
+      const [px] = mapToPx(gx, 0);
+      ctx.beginPath(); ctx.moveTo(px*SCALE, 0); ctx.lineTo(px*SCALE, cv.height); ctx.stroke();
+      ctx.fillStyle = '#ff8f8f'; ctx.font = '10px monospace';
+      ctx.fillText(gx.toFixed(2), px*SCALE+2, 11);
+    }
+    for(let gy = Math.ceil(yMin/0.2)*0.2; gy <= yMax; gy += 0.2){
+      const [,py] = mapToPx(0, gy);
+      ctx.beginPath(); ctx.moveTo(0, py*SCALE); ctx.lineTo(cv.width, py*SCALE); ctx.stroke();
+      ctx.fillStyle = '#ff8f8f'; ctx.font = '10px monospace';
+      ctx.fillText(gy.toFixed(2), 2, py*SCALE-2);
+    }
+  }
+
+  // origin marker
+  const [ox, oy] = mapToPx(0,0);
+  ctx.strokeStyle = '#5fd3a3'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(0, oy*SCALE); ctx.lineTo(cv.width, oy*SCALE); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ox*SCALE, 0); ctx.lineTo(ox*SCALE, cv.height); ctx.stroke();
+  ctx.fillStyle = '#5fd3a3';
+  ctx.beginPath(); ctx.arc(ox*SCALE, oy*SCALE, 4, 0, Math.PI*2); ctx.fill();
+
+  // clicked points
+  points.forEach((p,i)=>{
+    ctx.fillStyle = '#f2a65a';
+    ctx.beginPath(); ctx.arc(p.px*SCALE, p.py*SCALE, 4, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#0d1117'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = '#f2a65a'; ctx.font = 'bold 10px monospace';
+    ctx.fillText('P'+(i+1), p.px*SCALE+6, p.py*SCALE-6);
+  });
+}
+
+img.onload = draw;
+
+function updateReadout(px, py){
+  const [x,y] = pxToMap(px, py);
+  document.getElementById('pxOut').textContent = `(${px.toFixed(0)}, ${py.toFixed(0)})`;
+  document.getElementById('xyOut').textContent = `${x.toFixed(3)} m, ${y.toFixed(3)} m`;
+  const cx = Math.min(META.image_w-1, Math.max(0, Math.round(px)));
+  const cy = Math.min(META.image_h-1, Math.max(0, Math.round(py)));
+  try{
+    const d = ctx.getImageData(cx*SCALE, cy*SCALE, 1, 1).data;
+    const v = d[0];
+    let label = v > 250 ? 'free (흰색)' : v < 10 ? 'occupied (검정, 벽)' : 'unknown (회색)';
+    document.getElementById('occOut').textContent = `${v} — ${label}`;
+  }catch(e){}
+}
+
+cv.addEventListener('mousemove', (e)=>{
+  const r = cv.getBoundingClientRect();
+  const px = (e.clientX - r.left) * (cv.width / r.width) / SCALE;
+  const py = (e.clientY - r.top) * (cv.height / r.height) / SCALE;
+  updateReadout(px, py);
+});
+
+function renderPointsList(){
+  const list = document.getElementById('pointsList');
+  const empty = document.getElementById('pointsEmpty');
+  list.innerHTML = '';
+  empty.style.display = points.length ? 'none' : 'block';
+  points.forEach((p,i)=>{
+    const li = document.createElement('li');
+    li.innerHTML = `<span><span class="c">P${i+1}</span> — map: (${p.x.toFixed(3)}, ${p.y.toFixed(3)}) m &nbsp; px: (${p.px.toFixed(0)}, ${p.py.toFixed(0)})</span>`;
+    const btn = document.createElement('button');
+    btn.textContent = '삭제';
+    btn.onclick = ()=>{ points.splice(i,1); renderPointsList(); draw(); };
+    li.appendChild(btn);
+    list.appendChild(li);
+  });
+}
+
+cv.addEventListener('click', (e)=>{
+  const r = cv.getBoundingClientRect();
+  const px = (e.clientX - r.left) * (cv.width / r.width) / SCALE;
+  const py = (e.clientY - r.top) * (cv.height / r.height) / SCALE;
+  const [x,y] = pxToMap(px, py);
+  points.push({px, py, x, y});
+  renderPointsList();
+  draw();
+});
+
+document.getElementById('clearBtn').onclick = ()=>{ points = []; renderPointsList(); draw(); };
+document.getElementById('gridBtn').onclick = ()=>{ showGrid = !showGrid; draw(); };
+</script>
+</body>
+</html>
