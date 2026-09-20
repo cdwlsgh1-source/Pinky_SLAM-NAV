@@ -31,11 +31,11 @@ class PatrolClient(Node):
         # 노드가 막 켜진 직후라 로봇과 연결이 안 됐을 수도 있으니
         # 1초 정도 잠깐 기다렸다가 명령을 보낸다
         time.sleep(1.0)
-
-        msg = String()
-        msg.data = cmd
-        self.cmd_pub.publish(msg)   # 참고: cmd_pub = create_publisher() -> 받은 명령을 발행(메시지 발송)
-
+        msg = String()             # 빈 메시지 상자 만듬
+        msg.data = cmd             # String().data 값에 cmd 값을 복사
+        self.cmd_pub.publish(msg)  # create_publisher.publisher(msg) / 복사된 cmd 값을 publish 함 
+        """이렇게 사용하는 이유는: 
+        명령어 종류마다 Start, Stop, monitor 등 함수를 따로 만들지 않고 하나의 함수로 통합하기 위함"""
 
 def main():
     # 인자 개수 확인 (파일명 포함 3개 필요: 파일명, namespace, action)
