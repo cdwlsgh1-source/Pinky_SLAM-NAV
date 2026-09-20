@@ -1,0 +1,96 @@
+name: pinky_bridge_pinky2_only
+
+topics:
+  # 관제 PC(50) -> 핑키2(22)
+  /pinky2/patrol_cmd:
+    type: std_msgs/msg/String
+    from_domain: 50
+    to_domain: 22
+    remap: /patrol_cmd
+
+  /patrol_status:
+    type: std_msgs/msg/String
+    from_domain: 22
+    to_domain: 50
+    remap: /pinky2/patrol_status
+
+  /pinky2/cmd_vel:
+    type: geometry_msgs/msg/Twist
+    from_domain: 50
+    to_domain: 22
+    remap: /cmd_vel
+
+  /pinky2/initialpose:
+    type: geometry_msgs/msg/PoseWithCovarianceStamped
+    from_domain: 50
+    to_domain: 22
+    remap: /initialpose
+
+  /pinky2/goal_pose:
+    type: geometry_msgs/msg/PoseStamped
+    from_domain: 50
+    to_domain: 22
+    remap: /goal_pose
+
+  # 핑키2(22) -> 관제 PC(50)
+  /scan:
+    type: sensor_msgs/msg/LaserScan
+    from_domain: 22
+    to_domain: 50
+    remap: /pinky2/scan
+
+  /odom:
+    type: nav_msgs/msg/Odometry
+    from_domain: 22
+    to_domain: 50
+    remap: /pinky2/odom
+
+  /tf:
+    type: tf2_msgs/msg/TFMessage
+    from_domain: 22
+    to_domain: 50
+    remap: /pinky2/tf
+
+  /tf_static:
+    type: tf2_msgs/msg/TFMessage
+    from_domain: 22
+    to_domain: 50
+    remap: /pinky2/tf_static
+
+  /amcl_pose:
+    type: geometry_msgs/msg/PoseWithCovarianceStamped
+    from_domain: 22
+    to_domain: 50
+    remap: /pinky2/amcl_pose
+
+  /battery_state:
+    type: sensor_msgs/msg/BatteryState
+    from_domain: 22
+    to_domain: 50
+    remap: /pinky2/battery_state
+
+  # === ZONE-MUTEX ADDED ======================================================
+  # zone_manager_node는 관제 PC(도메인 50)에서만 실행됩니다.
+  # 메시지 안에 "pinky2:토큰" 형태로 robot_id가 이미 포함되어 있어서
+  # patrol_cmd/status와 달리 로봇별로 토픽 이름을 따로 remap할 필요가 없습니다.
+  # (pinky1 쪽 브릿지 파일과 토픽 이름을 동일하게 맞춰서, 관제 PC의
+  #  /zone_manager/request_entry 토픽 하나에 두 로봇이 함께 publish/subscribe함)
+
+  # 로봇(22) -> 관제 PC(50): "구역 들어갈게요" 요청
+  /zone_manager/request_entry:
+    type: std_msgs/msg/String
+    from_domain: 22
+    to_domain: 50
+
+  # 로봇(22) -> 관제 PC(50): "구역 나왔어요" 통보
+  /zone_manager/notify_exit:
+    type: std_msgs/msg/String
+    from_domain: 22
+    to_domain: 50
+
+  # 관제 PC(50) -> 로봇(22): 진입 허가
+  /zone_manager/grant_entry:
+    type: std_msgs/msg/String
+    from_domain: 50
+    to_domain: 22
+  # ============================================================================
