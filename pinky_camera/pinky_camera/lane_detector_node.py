@@ -53,7 +53,7 @@ class LaneDetectorNode(Node):
         self.declare_parameter('device', 'cpu')
         self.declare_parameter('crossline_class_id', 0)
         self.declare_parameter('lane_class_id', 1)
-        self.declare_parameter('lane_roi_ratio', 0.2)
+        self.declare_parameter('lane_roi_ratio', 0.4)
         self.declare_parameter('debug_image', True)
         self.declare_parameter('jpeg_quality', 80)
 
@@ -131,10 +131,30 @@ class LaneDetectorNode(Node):
         masks_np = result.masks.data.cpu().numpy()  # (N, H, W), 모델에 따라 원본과 크기가 다를 수 있음
 
         lane_indices = np.where(cls_ids == self.lane_class_id)[0]
+
+        # ---- 임시 디버그 ----
+        self.get_logger().info(
+            f'lane_class_id={self.lane_class_id}, cls_ids={cls_ids.tolist()}, '
+            f'lane_indices={lane_indices.tolist()}, masks_np.shape={masks_np.shape}, '
+            f'lane_roi_ratio={self.lane_roi_ratio}',
+            throttle_duration_sec=1.0)
+        # ---- 여기까지 ----
+        
         if len(lane_indices) == 0:
             return 0.0, False
 
         lane_mask = np.any(masks_np[lane_indices] > 0.5, axis=0).astype(np.uint8)
+
+        # ---- 임시 디버그 ----
+        h, w = lane_mask.shape
+        roi_start = int(h * (1 - self.lane_roi_ratio))
+        roi = lane_mask[roi_start:h, :]
+        self.get_logger().info(
+            f'lane_mask 전체 픽셀 수={lane_mask.sum()}, '
+            f'ROI(y={roi_start}~{h}) 안 픽셀 수={roi.sum()}',
+            throttle_duration_sec=1.0)
+        # ---- 여기까지 ----
+
 
         # 마스크 해상도가 원본 프레임과 다르면 정규화된 offset 계산에는 영향 없음
         # (extract_center_offset은 mask 자체의 W를 기준으로 정규화하기 때문)

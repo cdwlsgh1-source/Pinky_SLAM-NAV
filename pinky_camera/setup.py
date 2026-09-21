@@ -22,11 +22,11 @@ setup(
     maintainer_email='you@example.com',
     description='Pinky 로봇 CSI 카메라(picamera2) 영상을 ROS2 CompressedImage 토픽으로 발행하는 패키지',
     license='Apache-2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'camera_node = pinky_camera.camera_node:main',
             'lane_detector_node = pinky_camera.lane_detector_node:main',
+            'lane_follow_node = pinky_camera.lane_follow_node:main',
         ],
     },
 )

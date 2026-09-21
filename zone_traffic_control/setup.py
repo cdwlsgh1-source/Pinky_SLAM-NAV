@@ -22,7 +22,6 @@ setup(
     maintainer_email='you@example.com',
     description='Nav2 다중 로봇 구역(zone) 상호 배제 트래픽 제어 패키지',
     license='Apache-2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'zone_manager_node = zone_traffic_control.zone_manager_node:main',
