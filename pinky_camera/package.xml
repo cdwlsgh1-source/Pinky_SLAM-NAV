@@ -9,6 +9,8 @@
 
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <!-- lane_detector_node(PC)는 pip 패키지 ultralytics가 필요함 (rosdep 키 없음) -->
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-picamera2</exec_depend>
   <exec_depend>launch</exec_depend>

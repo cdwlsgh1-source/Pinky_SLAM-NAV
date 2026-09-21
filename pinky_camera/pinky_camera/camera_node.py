@@ -21,12 +21,16 @@ class CameraNode(Node):
         self.declare_parameter('fps', 30)
         self.declare_parameter('jpeg_quality', 80)
         self.declare_parameter('frame_id', 'camera_link')
+        self.declare_parameter('hflip', True)
+        self.declare_parameter('vflip', True)
 
         self.width = self.get_parameter('width').value
         self.height = self.get_parameter('height').value
         self.fps = self.get_parameter('fps').value
         self.jpeg_quality = self.get_parameter('jpeg_quality').value
         self.frame_id = self.get_parameter('frame_id').value
+        self.hflip = self.get_parameter('hflip').value
+        self.vflip = self.get_parameter('vflip').value
 
         self.picam2 = None
         self._open_camera()
@@ -39,11 +43,13 @@ class CameraNode(Node):
 
     def _open_camera(self):
         # picamera2는 로봇에만 설치되어 있으므로 노드 생성 시점에 import
+        from libcamera import Transform
         from picamera2 import Picamera2
 
         self.picam2 = Picamera2()
         config = self.picam2.create_video_configuration(
             main={'size': (self.width, self.height), 'format': 'RGB888'},
+            transform=Transform(hflip=self.hflip, vflip=self.vflip),
             controls={'FrameDurationLimits': (int(1e6 / self.fps), int(1e6 / self.fps))},
         )
         self.picam2.configure(config)

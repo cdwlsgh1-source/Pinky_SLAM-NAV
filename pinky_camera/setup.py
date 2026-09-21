@@ -26,6 +26,7 @@ setup(
     entry_points={
         'console_scripts': [
             'camera_node = pinky_camera.camera_node:main',
+            'lane_detector_node = pinky_camera.lane_detector_node:main',
         ],
     },
 )

@@ -1,0 +1,16 @@
+lane_detector_node:
+  ros__parameters:
+    # 학습한 YOLO segment 모델(클래스: 0=Crossline, 1=Lane) 경로
+    model_path: /home/jinho/dev_ws/best.pt
+    # 추론 입력 크기 (학습 imgsz와 동일하게 640)
+    imgsz: 640
+    # 검출 신뢰도 임계값. 오검출이 많으면 올릴 것
+    conf: 0.5
+    # 추론 장치 ('cpu' | '0' 등 GPU 인덱스)
+    device: cpu
+    # Crossline 클래스 id (data.yaml 기준)
+    crossline_class_id: 0
+    # 디버그 영상(lane/debug/compressed) 발행 여부. 구독자가 없으면 자동으로 생략됨
+    debug_image: true
+    # 디버그 영상 JPEG 압축 품질 (1~100)
+    jpeg_quality: 80
