@@ -21,7 +21,7 @@ class LaneDetectorNode(Node):
         super().__init__('lane_detector_node')
 
         # 파라미터 선언 (이름, 기본값)
-        self.declare_parameter('model_path', '/home/jinho/dev_ws/best.pt')
+        self.declare_parameter('model_path', '/home/jinho/dev_ws/pinky_slam_nav/pinky_camera/best.pt')
         self.declare_parameter('imgsz', 640)
         self.declare_parameter('conf', 0.5)
         self.declare_parameter('device', 'cpu')
