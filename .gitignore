@@ -1,0 +1,26 @@
+# colcon 빌드 산출물 (루트에서 빌드하든 하위 workspace에서 빌드하든 모두 제외)
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+
+# ros2_network_test 스크립트가 실행 위치에 만드는 로그 폴더
+ros2_net_diag_*/
+
+# ROS bag
+*.bag
+*.db3
+*.mcap
+rosbag2_*/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
