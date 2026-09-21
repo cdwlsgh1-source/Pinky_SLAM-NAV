@@ -34,10 +34,10 @@ class PinkyPatrolNode(Node):
     "P5": (1.000,  0.100),   # 중앙-우측 위 (mid right, upper)
     "P6": (1.550,  0.060),   # 우측 위 끝 (far right, upper)
     "P7": (0.000, -0.600),   # 원점 아래쪽 (x는 원점과 거의 동일, y만 아래로)
-	"RED1IN": (0.600, -0.300, 0),       # RED1 LINE — 위험 구역 진입을 표시하는 경계 지점 IN Position
-    "RED1OUT": (0.600, -0.300, 3.14),   # RED1 LINE — 위험 구역 진입을 표시하는 경계 지점 OUT Position
-	"RED2IN": (0.450, -0.600, 0),       # RED2 LINE — 위험 구역 진입을 표시하는 경계 지점 IN Position
-	"RED2OUT": (0.450, -0.600, 3.14),   # RED2 LINE — 위험 구역 진입을 표시하는 경계 지점 OUT Position
+	"RED1IN": (0.600, -0.500, 0),       # RED1 LINE — 위험 구역 진입을 표시하는 경계 지점 IN Position
+    "RED1OUT": (0.600, -0.500, 3.14),   # RED1 LINE — 위험 구역 진입을 표시하는 경계 지점 OUT Position
+	"RED2IN": (0.550, -0.800, 0),       # RED2 LINE — 위험 구역 진입을 표시하는 경계 지점 IN Position
+	"RED2OUT": (0.550, -0.800, 3.14),   # RED2 LINE — 위험 구역 진입을 표시하는 경계 지점 OUT Position
 	}
 
     # Pinky 2 경로: 원점 아래쪽 -> P4 진입 -> P3 -> P6 -> P4로 복귀 -> 원점 아래쪽
