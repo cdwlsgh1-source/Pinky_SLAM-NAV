@@ -1,0 +1,11 @@
+camera_node:
+  ros__parameters:
+    # 캡처 해상도. 이후 best.pt 추론 입력 크기(imgsz)와 맞춰서 조정할 것
+    width: 640
+    height: 480
+    # 초당 프레임 수 (타이머 주기와 카메라 FrameDurationLimits에 함께 사용)
+    fps: 30
+    # JPEG 압축 품질 (1~100). 낮출수록 대역폭 절약
+    jpeg_quality: 80
+    # 발행 메시지 header.frame_id
+    frame_id: camera_link
