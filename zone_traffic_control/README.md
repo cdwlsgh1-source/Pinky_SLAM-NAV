@@ -1,4 +1,5 @@
 # zone_traffic_control (v2 — self-report 방식)
+<img width="1480" height="1030" alt="architecture_diagram_light" src="https://github.com/user-attachments/assets/e214a12d-6e1e-42eb-a520-4c288d4e6de2" />
 
 여러 대의 로봇(예: Pinky Pro pinky1, pinky2)이 지정된 공유 구역(zone)에
 **동시에 한 대만** 들어갈 수 있도록 상호 배제(mutual exclusion)를 제공하는
