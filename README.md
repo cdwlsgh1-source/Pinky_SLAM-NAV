@@ -28,7 +28,7 @@ Pinky 로봇 2대(`pinky1`, `pinky2`)를 관제 PC에서 원격으로 순찰시�
 pinky_slam_nav/
 ├── bridge_ws/              # 도메인 브릿지 (workspace + 로봇별 설정)
 ├── my_pinky_package/       # 로봇에서 실행하는 순찰 노드
-├── pinky_patrol/           # 관제 PC용 순찰 명령/모니터링 클라이언트
+├── pinky_patrol_cmd/           # 관제 PC용 순찰 명령/모니터링 클라이언트
 ├── zone_traffic_control/   # 구역 상호 배제(mutex) ROS 2 패키지
 ├── ros2_network_test/      # 무선 네트워크 진단 스크립트
 └── map_view/               # 지도 좌표 확인용 웹 뷰어
@@ -84,7 +84,7 @@ python3 pinky_patrol_node_pinky2.py --ros-args -p robot_id:=pinky2
 
 > `robot_id`는 `zone_traffic_control/config/zone_params.yaml`의 `robot_ids`와 같아야 합니다.
 
-### 3. `pinky_patrol/` — 관제 PC용 순찰 클라이언트
+### 3. `pinky_patrol_cmd/` — 관제 PC용 순찰 클라이언트
 
 | 파일 | 기능 |
 |---|---|
