@@ -34,8 +34,10 @@ class PinkyPatrolNode(Node):
     "P5": (1.000,  0.100),   # 중앙-우측 위 (mid right, upper)
     "P6": (1.550,  0.060),   # 우측 위 끝 (far right, upper)
     "P7": (0.000, -0.600),   # 원점 아래쪽 (x는 원점과 거의 동일, y만 아래로)
-	"RED1": (0.600, -0.300),  # RED1 LINE — 위험 구역 진입을 표시하는 경계 지점
-	"RED2": (0.450, -0.600),  # RED2 LINE — 위험 구역 진입을 표시하는 경계 지점
+	"RED1IN": (0.600, -0.300, 0),       # RED1 LINE — 위험 구역 진입을 표시하는 경계 지점 IN Position
+    "RED1OUT": (0.600, -0.300, 3.14),   # RED1 LINE — 위험 구역 진입을 표시하는 경계 지점 OUT Position
+	"RED2IN": (0.450, -0.600, 0),       # RED2 LINE — 위험 구역 진입을 표시하는 경계 지점 IN Position
+	"RED2OUT": (0.450, -0.600, 3.14),   # RED2 LINE — 위험 구역 진입을 표시하는 경계 지점 OUT Position
 	}
 
     # Pinky 1 경로: 원점 -> 중간지점 -> RED(위험 구역 경계) -> P3 -> P6 -> 원점 복귀
@@ -44,12 +46,12 @@ class PinkyPatrolNode(Node):
     # (RED는 위험 구역의 "문": RED까지는 자유롭게 이동하고, RED를 지나서
     #  P3로 향하려는 순간부터 허가가 필요하다. P1로 돌아오면 위험 구역 종료)
     WAYPOINTS = [
-        POINTS["P2"],    # 0: 중간 경유점
-        POINTS["RED1"],  # 1: RED LINE       <- 여기 도착 후 진입 허가 요청
-        POINTS["P3"],    # 2: 우측 아래 끝      (위험 구역 안)
-        POINTS["P6"],    # 3: 우측 위 끝      (위험 구역 안)
-        POINTS["RED1"],  # 4: RED LINE       <- 여기 도착 시 이탈 통보
-        POINTS["P1"],    # 5: 시작점으로 복귀
+        POINTS["P2"],       # 0: 중간 경유점
+        POINTS["RED1IN"],   # 1: RED LINE       <- 여기 도착 후 진입 허가 요청
+        POINTS["P3"],       # 2: 우측 아래 끝      (위험 구역 안)
+        POINTS["P6"],       # 3: 우측 위 끝      (위험 구역 안)
+        POINTS["RED1OUT"],  # 4: RED LINE       <- 여기 도착 시 이탈 통보
+        POINTS["P1"],       # 5: 시작점으로 복귀
     ]
 
     # === ZONE-MUTEX ADDED =====================================================
