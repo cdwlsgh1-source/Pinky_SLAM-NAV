@@ -1,105 +1,127 @@
 import sys
 
 import rclpy
-from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy
+from geometry_msgs.msg import Twist
 from std_msgs.msg import Bool, Float32
 
 
 class LaneFollowerNode(Node):
     """
-    lane_detector_node가 발행하는 <namespace>/lane/center_offset, <namespace>/lane/detected
-    를 구독해 <namespace>/cmd_vel(geometry_msgs/Twist)을 발행하는 주행 제어 노드.
+    lane_detector_node가 발행하는 lane/center_offset, lane/detected(, crossline/detected)를
+    구독해서 실제로 cmd_vel(Twist)을 publish하는 주행 노드.
 
-    제어 로직:
-      - 최근(offset_timeout_sec 이내)에 lane/detected=True 였다면:
-            linear.x  = linear_speed (고정 속도)
-            angular.z = -kp * offset  (offset 부호에 비례하는 단순 P 제어)
-      - 차선을 못 찾았거나(lane/detected=False) 일정 시간 이상 새 데이터가 없으면:
-            즉시 정지 (linear.x = 0, angular.z = 0)
+    제어 방식: offset(-1.0 ~ 1.0, 0이 정중앙)에 대한 P(비례) + D(미분) 제어.
+      angular.z = -(kp * offset + kd * d_offset/dt)
+      (offset이 양수 = 차선 중심이 화면 오른쪽에 있음 -> 오른쪽으로 돌아야 하므로
+       ROS 표준(양의 각속도 = 반시계/왼쪽 회전) 기준 angular.z는 음수 방향)
 
-    주의: offset은 lane_detector_node 기준 '왼쪽=음수, 오른쪽=양수'로 정의되어 있음.
-          ROS REP-103 기준 angular.z는 양수가 좌회전(반시계) 방향이므로,
-          차선이 오른쪽에 있을 때(offset 양수) 오른쪽으로 꺾어야 하니
-          angular.z는 음수가 되어야 함 -> angular_z = -kp * offset.
-          실제 로봇에서 반대로 움직이면 kp 부호만 뒤집으면 됩니다.
+    안전장치:
+      - 차선을 잃어버리면(lane_detected=False) lost_count를 누적하고,
+        max_lost_frames를 넘기면 정지(linear.x=0)한다.
+      - offset 토픽 자체가 일정 시간(watchdog_timeout) 이상 끊기면(카메라/추론 노드 다운)
+        무조건 정지한다.
     """
 
     def __init__(self):
         super().__init__('lane_follower_node')
 
-        self.declare_parameter('kp', 1.5)
-        self.declare_parameter('linear_speed', 0.15)
-        self.declare_parameter('max_angular_speed', 1.0)
-        self.declare_parameter('offset_timeout_sec', 0.5)
-        self.declare_parameter('control_rate_hz', 20.0)
+        self.declare_parameter('linear_speed', 0.15)          # 기본 직진 속도 (m/s)
+        self.declare_parameter('min_linear_speed', 0.05)      # 많이 꺾을 때 최저 속도
+        self.declare_parameter('kp', 1.2)                     # 비례 게인
+        self.declare_parameter('kd', 0.3)                     # 미분 게인
+        self.declare_parameter('max_angular_speed', 1.5)      # 각속도 제한 (rad/s)
+        self.declare_parameter('max_lost_frames', 10)         # 차선 미검출 허용 프레임 수
+        self.declare_parameter('watchdog_timeout', 0.5)       # offset 미수신 시 정지까지 시간(s)
+        self.declare_parameter('stop_on_crossline', False)    # Crossline 검출 시 정지할지 여부
+        self.declare_parameter('crossline_stop_duration', 2.0)  # 정지 유지 시간(s)
 
-        self.kp = self.get_parameter('kp').value
         self.linear_speed = self.get_parameter('linear_speed').value
+        self.min_linear_speed = self.get_parameter('min_linear_speed').value
+        self.kp = self.get_parameter('kp').value
+        self.kd = self.get_parameter('kd').value
         self.max_angular_speed = self.get_parameter('max_angular_speed').value
-        self.offset_timeout_sec = self.get_parameter('offset_timeout_sec').value
-        control_rate_hz = self.get_parameter('control_rate_hz').value
+        self.max_lost_frames = self.get_parameter('max_lost_frames').value
+        self.watchdog_timeout = self.get_parameter('watchdog_timeout').value
+        self.stop_on_crossline = self.get_parameter('stop_on_crossline').value
+        self.crossline_stop_duration = self.get_parameter('crossline_stop_duration').value
 
-        # 카메라/인식 파이프라인과 동일하게 BEST_EFFORT + depth=1
-        # (오래된 offset 값을 큐에서 처리하느라 지연되는 것을 방지)
+        self._prev_offset = 0.0
+        self._prev_time = self.get_clock().now()
+        self._lost_count = 0
+        self._last_msg_time = self.get_clock().now()
+        self._crossline_stop_until = None  # rclpy Time or None
+
         qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
-
-        self._latest_offset = 0.0
-        self._latest_detected = False
-        self._last_update_time = None  # rclpy Time, 마지막으로 메시지를 받은 시각
-
-        self.offset_sub = self.create_subscription(
-            Float32, 'lane/center_offset', self._offset_callback, qos)
-        self.detected_sub = self.create_subscription(
-            Bool, 'lane/detected', self._detected_callback, qos)
 
         self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
 
-        # 제어 루프는 인식 노드의 발행 주기에 휘둘리지 않도록 별도 고정 주기 타이머로 실행
-        self.control_timer = self.create_timer(1.0 / control_rate_hz, self._control_loop)
+        self.create_subscription(Float32, 'lane/center_offset', self.offset_callback, qos)
+        self.create_subscription(Bool, 'lane/detected', self.detected_callback, qos)
+        self.create_subscription(Bool, 'crossline/detected', self.crossline_callback, qos)
 
-        self._stopped_logged = False
+        # offset 토픽이 끊기면(카메라/추론 노드 다운) 정지시키는 워치독 타이머
+        self.create_timer(0.1, self.watchdog_tick)
 
-        self.get_logger().info(
-            f'lane_follower_node 시작: kp={self.kp}, linear_speed={self.linear_speed}, '
-            f'max_angular_speed={self.max_angular_speed}, '
-            f'offset_timeout_sec={self.offset_timeout_sec}, control_rate={control_rate_hz}Hz')
+        self._lane_detected = False
 
-    def _offset_callback(self, msg: Float32):
-        self._latest_offset = msg.data
-        self._last_update_time = self.get_clock().now()
+        self.get_logger().info('lane_follower_node 시작 (cmd_vel 발행)')
 
-    def _detected_callback(self, msg: Bool):
-        self._latest_detected = msg.data
-        # detected 콜백도 '데이터가 살아있다'는 신호이므로 타임스탬프 갱신
-        self._last_update_time = self.get_clock().now()
-
-    def _control_loop(self):
-        twist = Twist()
-
-        timed_out = (
-            self._last_update_time is None
-            or (self.get_clock().now() - self._last_update_time).nanoseconds
-            > self.offset_timeout_sec * 1e9
-        )
-
-        if timed_out or not self._latest_detected:
-            # 안전 정지: 차선 정보가 없거나(lane/detected=False) 데이터가 오래된 경우
-            twist.linear.x = 0.0
-            twist.angular.z = 0.0
-            if not self._stopped_logged:
-                reason = '데이터 타임아웃' if timed_out else '차선 미검출'
-                self.get_logger().warn(f'정지: {reason}')
-                self._stopped_logged = True
+    def detected_callback(self, msg: Bool):
+        self._lane_detected = msg.data
+        if not msg.data:
+            self._lost_count += 1
         else:
-            angular_z = -self.kp * self._latest_offset
-            angular_z = max(-self.max_angular_speed, min(self.max_angular_speed, angular_z))
+            self._lost_count = 0
 
-            twist.linear.x = self.linear_speed
-            twist.angular.z = angular_z
-            self._stopped_logged = False
+    def crossline_callback(self, msg: Bool):
+        if self.stop_on_crossline and msg.data and self._crossline_stop_until is None:
+            self.get_logger().info('Crossline 검출: 잠시 정지')
+            self._crossline_stop_until = self.get_clock().now() + rclpy.duration.Duration(
+                seconds=self.crossline_stop_duration)
 
+    def offset_callback(self, msg: Float32):
+        now = self.get_clock().now()
+        self._last_msg_time = now
+
+        # Crossline 정지 구간이면 그대로 정지 유지
+        if self._crossline_stop_until is not None:
+            if now < self._crossline_stop_until:
+                self.publish_cmd(0.0, 0.0)
+                return
+            self._crossline_stop_until = None
+
+        # 차선을 너무 오래 잃어버렸으면 정지 (그 자리에서 찾을 시간을 줌)
+        if self._lost_count >= self.max_lost_frames:
+            self.publish_cmd(0.0, 0.0)
+            return
+
+        offset = float(msg.data)
+        dt = max((now - self._prev_time).nanoseconds / 1e9, 1e-3)
+        d_offset = (offset - self._prev_offset) / dt
+
+        angular_z = -(self.kp * offset + self.kd * d_offset)
+        angular_z = max(-self.max_angular_speed, min(self.max_angular_speed, angular_z))
+
+        # 많이 꺾을수록(오프셋이 클수록) 속도를 줄여서 커브에서 안정적으로 돌게 함
+        speed_scale = max(0.0, 1.0 - min(abs(offset), 1.0))
+        linear_x = self.min_linear_speed + (self.linear_speed - self.min_linear_speed) * speed_scale
+
+        self.publish_cmd(linear_x, angular_z)
+
+        self._prev_offset = offset
+        self._prev_time = now
+
+    def watchdog_tick(self):
+        elapsed = (self.get_clock().now() - self._last_msg_time).nanoseconds / 1e9
+        if elapsed > self.watchdog_timeout:
+            self.publish_cmd(0.0, 0.0)
+
+    def publish_cmd(self, linear_x: float, angular_z: float):
+        twist = Twist()
+        twist.linear.x = float(linear_x)
+        twist.angular.z = float(angular_z)
         self.cmd_pub.publish(twist)
 
 
@@ -118,11 +140,8 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        # 종료 시 로봇이 마지막 명령으로 계속 움직이지 않도록 정지 명령을 한 번 발행
-        try:
-            node.cmd_pub.publish(Twist())
-        except Exception:
-            pass
+        # 종료 시 로봇 정지
+        node.publish_cmd(0.0, 0.0)
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

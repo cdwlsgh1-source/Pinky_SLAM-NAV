@@ -1,0 +1,20 @@
+lane_follower_node:
+  ros__parameters:
+    # 기본 직진 속도 (m/s). 처음엔 낮게 시작해서 점점 올릴 것
+    linear_speed: 0.15
+    # 많이 꺾을 때(오프셋이 클 때)의 최저 속도
+    min_linear_speed: 0.05
+    # 비례 게인. 진동(좌우로 크게 흔들림)하면 낮출 것
+    kp: 1.2
+    # 미분 게인. 반응이 너무 느리면 올리고, 떨림이 심하면 낮출 것
+    kd: 0.3
+    # 각속도 제한 (rad/s)
+    max_angular_speed: 1.5
+    # 차선 미검출을 몇 프레임까지 허용할지 (그 이상이면 정지)
+    max_lost_frames: 10
+    # lane/center_offset 토픽이 이 시간(s) 이상 끊기면 무조건 정지 (워치독)
+    watchdog_timeout: 0.5
+    # Crossline 검출 시 정지할지 여부
+    stop_on_crossline: false
+    # Crossline에서 정지할 경우 정지 유지 시간(s)
+    crossline_stop_duration: 2.0

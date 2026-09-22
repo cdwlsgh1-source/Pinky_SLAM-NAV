@@ -9,26 +9,73 @@ from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import Bool, Float32
 
 
-def extract_center_offset(mask: np.ndarray, roi_ratio: float = 0.2):
+def _instance_centroid_x(instance_mask: np.ndarray, roi_start: int, min_pixels: int):
+    """단일 인스턴스 마스크의 ROI 안 픽셀 x좌표 평균과 픽셀 수를 반환한다."""
+    roi = instance_mask[roi_start:, :]
+    ys, xs = np.nonzero(roi)
+    if len(xs) < min_pixels:
+        return None
+    return float(xs.mean())
+
+
+def extract_center_offset(
+    instance_masks: np.ndarray,
+    roi_ratio: float = 0.2,
+    min_pixels: int = 15,
+    assumed_half_lane_width_ratio: float = 0.35,
+):
     """
-    mask: (H, W) 크기의 바이너리(0/1) 세그멘테이션 마스크 (Lane 클래스만 합친 것).
+    instance_masks: (N, H, W) 크기의, Lane 클래스로 검출된 '개별 인스턴스' 마스크들
+                     (좌/우 차선이 각각 별도 인스턴스로 검출된다고 가정).
     roi_ratio: 화면 하단에서 몇 %를 관심영역(ROI)으로 볼지. 0.2 = 하단 20%.
+    min_pixels: 인스턴스를 유효한 차선으로 인정할 최소 픽셀 수 (노이즈 제거용).
+    assumed_half_lane_width_ratio: 한쪽 차선만 보일 때, 반대편 차선까지의 거리를
+                     이미지 폭 대비 비율로 가정 (예: 0.35 = 이미지 폭의 35%).
 
     반환값: (offset, detected)
       offset   : -1.0(화면 완전 왼쪽) ~ 1.0(화면 완전 오른쪽), 0.0이 정중앙
-      detected : ROI 안에 차선 픽셀이 하나라도 있었는지 여부
-    """
-    h, w = mask.shape
-    roi_start = int(h * (1 - roi_ratio))
-    roi = mask[roi_start:h, :]
+      detected : 좌/우 중 최소 한쪽 차선을 찾았는지 여부
 
-    ys, xs = np.nonzero(roi)
-    if len(xs) == 0:
+    핵심 아이디어: 모든 차선 픽셀을 하나로 합쳐 평균내지 않고, 각 인스턴스의
+    중심 x를 구한 뒤 이미지 중앙 기준 좌/우로 나눠서, "좌측 차선 중심"과
+    "우측 차선 중심"의 중간점을 실제 목표 중심으로 삼는다.
+    """
+    if instance_masks is None or len(instance_masks) == 0:
         return 0.0, False
 
-    center_x = xs.mean()
+    h, w = instance_masks.shape[1], instance_masks.shape[2]
+    roi_start = int(h * (1 - roi_ratio))
     image_center_x = w / 2.0
-    offset = (center_x - image_center_x) / image_center_x
+
+    left_xs, right_xs = [], []
+    for inst in instance_masks:
+        cx = _instance_centroid_x(inst, roi_start, min_pixels)
+        if cx is None:
+            continue
+        if cx < image_center_x:
+            left_xs.append(cx)
+        else:
+            right_xs.append(cx)
+
+    # 여러 개로 쪼개져 검출된 경우(점선 등) 같은 쪽끼리는 평균으로 대표값 하나로 합침
+    left_x = float(np.mean(left_xs)) if left_xs else None
+    right_x = float(np.mean(right_xs)) if right_xs else None
+
+    half_lane_px = assumed_half_lane_width_ratio * w
+
+    if left_x is not None and right_x is not None:
+        # 양쪽 다 보임: 진짜 중간점
+        lane_center_x = (left_x + right_x) / 2.0
+    elif left_x is not None:
+        # 왼쪽만 보임: 오른쪽 차선이 half_lane_px*2 만큼 떨어져 있다고 가정하고
+        # 그 중간점(왼쪽 차선 + half_lane_px)을 목표 중심으로 삼는다.
+        lane_center_x = left_x + half_lane_px
+    elif right_x is not None:
+        lane_center_x = right_x - half_lane_px
+    else:
+        return 0.0, False
+
+    offset = (lane_center_x - image_center_x) / image_center_x
     offset = float(np.clip(offset, -1.0, 1.0))
     return offset, True
 
@@ -53,7 +100,9 @@ class LaneDetectorNode(Node):
         self.declare_parameter('device', 'cpu')
         self.declare_parameter('crossline_class_id', 0)
         self.declare_parameter('lane_class_id', 1)
-        self.declare_parameter('lane_roi_ratio', 0.4)
+        self.declare_parameter('lane_roi_ratio', 0.2)
+        self.declare_parameter('min_lane_pixels', 15)
+        self.declare_parameter('assumed_half_lane_width_ratio', 0.35)
         self.declare_parameter('debug_image', True)
         self.declare_parameter('jpeg_quality', 80)
 
@@ -65,6 +114,8 @@ class LaneDetectorNode(Node):
         self.crossline_class_id = self.get_parameter('crossline_class_id').value
         self.lane_class_id = self.get_parameter('lane_class_id').value
         self.lane_roi_ratio = self.get_parameter('lane_roi_ratio').value
+        self.min_lane_pixels = self.get_parameter('min_lane_pixels').value
+        self.assumed_half_lane_width_ratio = self.get_parameter('assumed_half_lane_width_ratio').value
         self.debug_image = self.get_parameter('debug_image').value
         self.jpeg_quality = self.get_parameter('jpeg_quality').value
 
@@ -123,7 +174,7 @@ class LaneDetectorNode(Node):
         self.publish_debug_image(msg, result)
 
     def compute_lane_offset(self, result):
-        """result.masks 중 Lane 클래스에 해당하는 것만 골라 하나로 합친 뒤 중심 오프셋을 계산한다."""
+        """result.masks 중 Lane 클래스 인스턴스들을 좌/우로 나눠 중간점 오프셋을 계산한다."""
         if result.masks is None or result.boxes is None:
             return 0.0, False
 
@@ -131,34 +182,20 @@ class LaneDetectorNode(Node):
         masks_np = result.masks.data.cpu().numpy()  # (N, H, W), 모델에 따라 원본과 크기가 다를 수 있음
 
         lane_indices = np.where(cls_ids == self.lane_class_id)[0]
-
-        # ---- 임시 디버그 ----
-        self.get_logger().info(
-            f'lane_class_id={self.lane_class_id}, cls_ids={cls_ids.tolist()}, '
-            f'lane_indices={lane_indices.tolist()}, masks_np.shape={masks_np.shape}, '
-            f'lane_roi_ratio={self.lane_roi_ratio}',
-            throttle_duration_sec=1.0)
-        # ---- 여기까지 ----
-        
         if len(lane_indices) == 0:
             return 0.0, False
 
-        lane_mask = np.any(masks_np[lane_indices] > 0.5, axis=0).astype(np.uint8)
-
-        # ---- 임시 디버그 ----
-        h, w = lane_mask.shape
-        roi_start = int(h * (1 - self.lane_roi_ratio))
-        roi = lane_mask[roi_start:h, :]
-        self.get_logger().info(
-            f'lane_mask 전체 픽셀 수={lane_mask.sum()}, '
-            f'ROI(y={roi_start}~{h}) 안 픽셀 수={roi.sum()}',
-            throttle_duration_sec=1.0)
-        # ---- 여기까지 ----
-
+        # 인스턴스를 합치지 않고 그대로 넘긴다 (좌/우 차선을 분리해서 보기 위함)
+        lane_instance_masks = (masks_np[lane_indices] > 0.5).astype(np.uint8)
 
         # 마스크 해상도가 원본 프레임과 다르면 정규화된 offset 계산에는 영향 없음
         # (extract_center_offset은 mask 자체의 W를 기준으로 정규화하기 때문)
-        return extract_center_offset(lane_mask, self.lane_roi_ratio)
+        return extract_center_offset(
+            lane_instance_masks,
+            self.lane_roi_ratio,
+            self.min_lane_pixels,
+            self.assumed_half_lane_width_ratio,
+        )
 
     def publish_debug_image(self, msg, result):
         # 디버그 옵션이 꺼져 있거나 구독자가 없으면 plot/JPEG 인코딩을 생략해 CPU 절약
