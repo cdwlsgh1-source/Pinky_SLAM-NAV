@@ -163,7 +163,7 @@ ros2 topic echo /zone_manager/status
 
 **실행**
 
-- 웹에서 바로 보기: [🗺️ Pinky Map Viewer 실행하기](https://htmlpreview.github.io/?https://raw.githubusercontent.com/cdwlsgh1-source/pinky_slam_nav/main/map_view/pinky_map_viewer.html)
+- 웹에서 바로 보기: [🗺️ Pinky Map Viewer 실행하기](https://htmlpreview.github.io/?https://raw.githubusercontent.com/cdwlsgh1-source/pinky_slam_nav/main/map_view_pc/pinky_map_viewer.html)
 - 로컬: `pinky_map_viewer.html`을 브라우저로 열기
 
 ## 전체 실행 순서 요약
