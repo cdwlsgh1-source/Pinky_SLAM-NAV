@@ -1,0 +1,13 @@
+launch:
+  - arg:
+      name: namespace
+      default: pinky1
+      description: 로봇 네임스페이스 (pinky1 | pinky2)
+  - node:
+      pkg: pinky_camera
+      exec: lane_detector_node
+      name: lane_detector_node
+      namespace: $(var namespace)
+      output: screen
+      param:
+        - from: $(find-pkg-share pinky_camera)/config/lane_detector_params.yaml
