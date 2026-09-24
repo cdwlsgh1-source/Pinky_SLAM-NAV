@@ -9,15 +9,21 @@ from sensor_msgs.msg import CompressedImage
 from std_msgs.msg import Bool, Float32
 
 
+# ===============================================================
+# 단일 인스턴스 마스크 -> ROI 내 x좌표 평균
+# ===============================================================
 def _instance_centroid_x(instance_mask: np.ndarray, roi_start: int, min_pixels: int):
-    """단일 인스턴스 마스크의 ROI 안 픽셀 x좌표 평균과 픽셀 수를 반환한다."""
     roi = instance_mask[roi_start:, :]
+    # np.nonzero: roi에서 0이 아닌(=마스크가 칠해진) 픽셀들의 좌표를 (y좌표 배열, x좌표 배열)로 반환
     ys, xs = np.nonzero(roi)
     if len(xs) < min_pixels:
         return None
     return float(xs.mean())
 
 
+# ===============================================================
+# 차선 인스턴스 마스크 -> 중심 오프셋 계산
+# ===============================================================
 def extract_center_offset(
     instance_masks: np.ndarray,
     roi_ratio: float = 0.2,
@@ -58,6 +64,7 @@ def extract_center_offset(
             right_xs.append(cx)
 
     # 여러 개로 쪼개져 검출된 경우(점선 등) 같은 쪽끼리는 평균으로 대표값 하나로 합침
+    # "X if 조건 else Y" 는 조건이 참이면 X, 거짓이면 Y (리스트가 비어있으면 None)
     left_x = float(np.mean(left_xs)) if left_xs else None
     right_x = float(np.mean(right_xs)) if right_xs else None
 
@@ -76,6 +83,7 @@ def extract_center_offset(
         return 0.0, False
 
     offset = (lane_center_x - image_center_x) / image_center_x
+    # np.clip(값, 최소, 최대): 값이 범위를 벗어나면 최소/최대로 잘라냄 (여기선 -1.0~1.0로 제한)
     offset = float(np.clip(offset, -1.0, 1.0))
     return offset, True
 
@@ -90,6 +98,9 @@ class LaneDetectorNode(Node):
       - <namespace>/lane/detected          : 이번 프레임에서 차선을 찾았는지 여부 (std_msgs/Bool)
     """
 
+    # ===============================================================
+    # 초기화 (파라미터 로드, YOLO 모델 로드, 구독자/발행자 등록)
+    # ===============================================================
     def __init__(self):
         super().__init__('lane_detector_node')
 
@@ -139,6 +150,9 @@ class LaneDetectorNode(Node):
             f'모델 로드 완료: {self.model_path} (task={self.model.task}, '
             f'classes={self.model.names}) {self.sub.topic_name} 구독 중')
 
+    # ===============================================================
+    # 메인 콜백 (이미지 수신 -> YOLO 추론 -> crossline/offset/디버그영상 발행)
+    # ===============================================================
     def image_callback(self, msg):
         # 1. JPEG -> OpenCV 이미지
         jpeg_bytes = np.frombuffer(msg.data, np.uint8)
@@ -173,19 +187,23 @@ class LaneDetectorNode(Node):
         # 5. 디버그 영상 발행
         self.publish_debug_image(msg, result)
 
+    # ===============================================================
+    # Lane 인스턴스 좌/우 분리 -> 중간점 오프셋 계산
+    # ===============================================================
     def compute_lane_offset(self, result):
-        """result.masks 중 Lane 클래스 인스턴스들을 좌/우로 나눠 중간점 오프셋을 계산한다."""
         if result.masks is None or result.boxes is None:
             return 0.0, False
 
         cls_ids = result.boxes.cls.cpu().numpy().astype(int)
         masks_np = result.masks.data.cpu().numpy()  # (N, H, W), 모델에 따라 원본과 크기가 다를 수 있음
 
+        # np.where(조건)[0]: cls_ids 중 조건(lane 클래스)을 만족하는 원소들의 인덱스만 배열로 반환
         lane_indices = np.where(cls_ids == self.lane_class_id)[0]
         if len(lane_indices) == 0:
             return 0.0, False
 
         # 인스턴스를 합치지 않고 그대로 넘긴다 (좌/우 차선을 분리해서 보기 위함)
+        # masks_np[lane_indices]: lane 인스턴스들만 골라냄 -> 0.5 초과 여부로 0/1 이진 마스크로 변환
         lane_instance_masks = (masks_np[lane_indices] > 0.5).astype(np.uint8)
 
         # 마스크 해상도가 원본 프레임과 다르면 정규화된 offset 계산에는 영향 없음
@@ -197,6 +215,9 @@ class LaneDetectorNode(Node):
             self.assumed_half_lane_width_ratio,
         )
 
+    # ===============================================================
+    # 디버그 영상 발행 (검출 결과를 그린 이미지를 JPEG로 인코딩해 publish)
+    # ===============================================================
     def publish_debug_image(self, msg, result):
         # 디버그 옵션이 꺼져 있거나 구독자가 없으면 plot/JPEG 인코딩을 생략해 CPU 절약
         if not self.debug_image:
@@ -218,6 +239,9 @@ class LaneDetectorNode(Node):
         self.debug_pub.publish(out)
 
 
+# ===============================================================
+# 엔트리 포인트 (노드 생성 후 rclpy.spin으로 실행, 종료 시 정리)
+# ===============================================================
 def main(args=None):
     rclpy.init(args=args)
 

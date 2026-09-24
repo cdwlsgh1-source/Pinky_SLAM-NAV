@@ -46,18 +46,15 @@ class CameraNode(Node):
         self.declare_parameter(
             'fps', 30, ParameterDescriptor(description='목표 프레임레이트'))
         self.declare_parameter(
-            'jpeg_quality', 80,
-            ParameterDescriptor(description='JPEG 압축 품질 (1~100, 높을수록 고품질/고용량)'))
+            'jpeg_quality', 80, ParameterDescriptor(description='JPEG 압축 품질 (1~100, 높을수록 고품질/고용량)'))
         self.declare_parameter(
-            'frame_id', 'camera_link',
-            ParameterDescriptor(description='이미지 헤더에 들어갈 frame_id'))
+            'frame_id', 'camera_link', ParameterDescriptor(description='이미지 헤더에 들어갈 frame_id'))
         self.declare_parameter(
             'hflip', True, ParameterDescriptor(description='좌우 반전 여부'))
         self.declare_parameter(
             'vflip', True, ParameterDescriptor(description='상하 반전 여부'))
         self.declare_parameter(
-            'topic_name', 'camera/image_raw/compressed',
-            ParameterDescriptor(description='발행할 토픽 이름 (네임스페이스는 자동으로 붙음)'))
+            'topic_name', 'camera/image_raw/compressed', ParameterDescriptor(description='발행할 토픽 이름 (네임스페이스는 자동으로 붙음)'))
 
         self.width = self.get_parameter('width').value
         self.height = self.get_parameter('height').value

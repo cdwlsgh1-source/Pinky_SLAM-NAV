@@ -24,17 +24,20 @@ class LaneFollowerNode(Node):
         무조건 정지한다.
     """
 
+    # ===============================================================
+    # 초기화 (파라미터 로드, 발행자/구독자/워치독 타이머 등록)
+    # ===============================================================
     def __init__(self):
         super().__init__('lane_follower_node')
 
-        self.declare_parameter('linear_speed', 0.15)          # 기본 직진 속도 (m/s)
-        self.declare_parameter('min_linear_speed', 0.05)      # 많이 꺾을 때 최저 속도
-        self.declare_parameter('kp', 1.2)                     # 비례 게인
-        self.declare_parameter('kd', 0.3)                     # 미분 게인
-        self.declare_parameter('max_angular_speed', 1.5)      # 각속도 제한 (rad/s)
-        self.declare_parameter('max_lost_frames', 10)         # 차선 미검출 허용 프레임 수
-        self.declare_parameter('watchdog_timeout', 0.5)       # offset 미수신 시 정지까지 시간(s)
-        self.declare_parameter('stop_on_crossline', False)    # Crossline 검출 시 정지할지 여부
+        self.declare_parameter('linear_speed', 0.15)            # 기본 직진 속도 (m/s)
+        self.declare_parameter('min_linear_speed', 0.05)        # 많이 꺾을 때 최저 속도
+        self.declare_parameter('kp', 1.2)                       # 비례 게인
+        self.declare_parameter('kd', 0.3)                       # 미분 게인
+        self.declare_parameter('max_angular_speed', 1.5)        # 각속도 제한 (rad/s)
+        self.declare_parameter('max_lost_frames', 10)           # 차선 미검출 허용 프레임 수
+        self.declare_parameter('watchdog_timeout', 0.5)         # offset 미수신 시 정지까지 시간(s)
+        self.declare_parameter('stop_on_crossline', False)      # Crossline 검출 시 정지할지 여부
         self.declare_parameter('crossline_stop_duration', 2.0)  # 정지 유지 시간(s)
 
         self.linear_speed = self.get_parameter('linear_speed').value
@@ -68,6 +71,9 @@ class LaneFollowerNode(Node):
 
         self.get_logger().info('lane_follower_node 시작 (cmd_vel 발행)')
 
+    # ===============================================================
+    # 콜백: 차선 검출 여부 수신 -> lost_count 갱신
+    # ===============================================================
     def detected_callback(self, msg: Bool):
         self._lane_detected = msg.data
         if not msg.data:
@@ -75,32 +81,41 @@ class LaneFollowerNode(Node):
         else:
             self._lost_count = 0
 
+    # ===============================================================
+    # 콜백: Crossline 검출 시 정지 종료 시각(_crossline_stop_until) 설정
+    # ===============================================================
     def crossline_callback(self, msg: Bool):
         if self.stop_on_crossline and msg.data and self._crossline_stop_until is None:
             self.get_logger().info('Crossline 검출: 잠시 정지')
+            # ROS 시간(Time)에 ROS 기간(Duration)을 더해 "몇 초 뒤 시각"을 구함
             self._crossline_stop_until = self.get_clock().now() + rclpy.duration.Duration(
                 seconds=self.crossline_stop_duration)
 
+    # ===============================================================
+    # 메인 콜백: offset 수신 -> PD 제어로 cmd_vel 계산 및 발행
+    # ===============================================================
     def offset_callback(self, msg: Float32):
         now = self.get_clock().now()
         self._last_msg_time = now
 
         # Crossline 정지 구간이면 그대로 정지 유지
-        if self._crossline_stop_until is not None:
+        if self._crossline_stop_until is not None:     
             if now < self._crossline_stop_until:
                 self.publish_cmd(0.0, 0.0)
                 return
             self._crossline_stop_until = None
 
         # 차선을 너무 오래 잃어버렸으면 정지 (그 자리에서 찾을 시간을 줌)
-        if self._lost_count >= self.max_lost_frames:
+        if self._lost_count >= self.max_lost_frames:   
             self.publish_cmd(0.0, 0.0)
             return
 
-        offset = float(msg.data)
+        # (now - self._prev_time)는 ROS Duration 객체 -> .nanoseconds로 나노초를 꺼내 초 단위로 변환
+        offset = float(msg.data)  
         dt = max((now - self._prev_time).nanoseconds / 1e9, 1e-3)
         d_offset = (offset - self._prev_offset) / dt
 
+        # max(최소값, min(최대값, x)): x를 [최소값, 최대값] 범위로 잘라내는(clamp) 관용 표현
         angular_z = -(self.kp * offset + self.kd * d_offset)
         angular_z = max(-self.max_angular_speed, min(self.max_angular_speed, angular_z))
 
@@ -113,11 +128,18 @@ class LaneFollowerNode(Node):
         self._prev_offset = offset
         self._prev_time = now
 
-    def watchdog_tick(self):
+    # ===============================================================
+    # 타이머: offset 수신이 오래 끊기면 강제 정지
+    # ===============================================================
+    def watchdog_tick(self):          
+        # 마지막 offset 수신 후 지금까지 흐른 시간(초)
         elapsed = (self.get_clock().now() - self._last_msg_time).nanoseconds / 1e9
         if elapsed > self.watchdog_timeout:
             self.publish_cmd(0.0, 0.0)
 
+    # ===============================================================
+    # 유틸: Twist 메시지를 만들어 cmd_vel로 발행
+    # ===============================================================
     def publish_cmd(self, linear_x: float, angular_z: float):
         twist = Twist()
         twist.linear.x = float(linear_x)
@@ -125,6 +147,9 @@ class LaneFollowerNode(Node):
         self.cmd_pub.publish(twist)
 
 
+# ===============================================================
+# 엔트리 포인트 (노드 생성 후 rclpy.spin으로 실행, 종료 시 정지 후 정리)
+# ===============================================================
 def main(args=None):
     rclpy.init(args=args)
 
@@ -139,8 +164,7 @@ def main(args=None):
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
-    finally:
-        # 종료 시 로봇 정지
+    finally:      # 종료 시 로봇 정지
         node.publish_cmd(0.0, 0.0)
         node.destroy_node()
         if rclpy.ok():
